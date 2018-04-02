@@ -1,0 +1,108 @@
+## survival models in R ##
+
+library(foreign)
+
+coalition.data <- read.dta("coalition.dta",  convert.factors=FALSE)
+coalition.data$fractionalization <- coalition.data$fractionalization/1000
+
+## duration measured in months
+
+olsmodel1 <- lm(duration ~ investiture + fractionalization + polarization + majority_government + crisis, data=coalition.data)
+summary(olsmodel1)
+
+install.packages("Zelig")
+library(Zelig)
+
+## the exponential survival model
+
+exp.survival <- zelig(Surv(duration, censor12) ~ investiture + fractionalization + polarization + majority_government + crisis, 
+model="exp", data=coalition.data)
+summary(exp.survival)
+
+# expected values and first differences
+x.minority <- setx(exp.survival, majority_government = 0)
+x.majority <- setx(exp.survival, majority_government = 1)
+
+exp.survival.sim <- sim(exp.survival, x=x.minority, x1=x.majority)
+summary(exp.survival.sim)
+
+plot(exp.survival.sim)
+
+
+## The Weibull model -- currently not working in Zelig, so we can work around it
+
+#weibull.survival <- zelig(Surv(duration, censor12) ~ identifiability + volatility + response + investiture + polarization + fractionalization + majority_government, model="weibull", data=coalition.data)
+
+weibull.survival <- survreg(Surv(duration, censor12) ~ investiture + fractionalization + polarization + majority_government + crisis, 
+dist="weibull", data=coalition.data, x=TRUE)  # note x=TRUE
+summary(weibull.survival)
+
+# scale is <1 so hazard rate decreasing over time
+
+# plot hazard rate over time
+p <- 1/weibull.survival$scale
+t <- seq(1,60,1)
+lambda <- exp(colMeans(weibull.survival$x) %*% weibull.survival$coefficients)
+weibull.hazard <- lambda * p * (lambda * t)^(1-p)
+plot(weibull.hazard, type="l")
+
+
+# expected values and first differences
+
+x.minority <- append(colMeans(weibull.survival$x),1)  # The 1 is so we can pick up the scale parameter
+x.minority["majority_government"] <- 0
+x.majority <- x.minority
+x.majority["majority_government"] <- 1
+
+weibull.coeffs <- append(weibull.survival$coefficients, log(weibull.survival$scale))
+
+betas <- mvrnorm(1000, weibull.coeffs, vcov(weibull.survival))
+
+expect.min <- 1/exp(-x.minority %*% t(betas))
+expect.maj <- 1/exp(-x.majority %*% t(betas))
+
+weibull.fd <- expect.maj - expect.min
+
+mean.min <- mean(expect.min)
+mean.maj <- mean(expect.maj)
+sd.min <- apply(expect.min,1,sd)
+sd.maj <- apply(expect.maj,1,sd)
+mean.fd <- mean(weibull.fd)
+sd.fd <- apply(weibull.fd,1,sd)
+
+fd.results <- rbind(cbind(mean.min, sd.min), cbind(mean.maj, sd.maj), cbind(mean.fd, sd.fd))
+colnames(fd.results) <- c("Mean", "SD")
+rownames(fd.results) <- c("Minority Govt", "Majority Govt", "FD")
+print(fd.results)
+
+
+## The Cox proportional hazard model -- once again not working in Zelig
+
+#coxph.survival <- exp.survival <- zelig(Surv(duration, censor12) ~ identifiability + volatility + response + investiture + polarization + fractionalization + majority_government, model="coxph", data=coalition.data)
+
+#install.packages("survival") -- already installed with Zelig
+#library(survival)
+
+coxph.survival <- coxph(Surv(duration, censor12) ~ identifiability + volatility + response + investiture + polarization + fractionalization + majority_government, data=coalition.data, x=TRUE)  # note x=TRUE
+summary(coxph.survival)  # note reversal of signs!
+
+# estimated survival function
+
+plot(survfit(coxph.survival), xlab="Months", ylab="Governments Surviving")
+
+x.minority <- colMeans(coxph.survival$x)  
+x.minority["majority_government"] <- 0
+x.majority <- x.minority
+x.majority["majority_government"] <- 1
+hyp.data <- as.data.frame(rbind(x.minority,x.majority))
+
+plot(survfit(coxph.survival, newdata=hyp.data), xlab="Months", ylab="Governments Surviving", conf.int=T, lty=c(1,2))
+legend("topright", legend=c("minority govt","majority govt"), lty=c(1,2))
+
+# interpreting in terms of expected time to failure is hard because we do not estimate a baseline
+# instead look at changes in the hazard rate
+
+hazard.pct.change <- ((exp(x.minority %*% t(betas)) - exp(x.majority %*% t(betas)))/exp(x.minority %*% t(betas)))*100
+hazard.mean <- mean(hazard.pct.change)
+hazard.sd <- apply(hazard.pct.change,1,sd)
+cbind(hazard.mean, hazard.sd)  # minority gov't 47% more likely to fail
