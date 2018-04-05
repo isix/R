@@ -3,7 +3,7 @@
 # ( ._> /  |   __|  _| -_|_ -|  _| -_|_ -|  |  |__| .'| . |_ -|
 #  `---'   |__|  |_| |___|___|_| |___|___|  |_____|__,|___|___|
 #==============================================================================
-# Plotting Survival Curves
+# Missing Value Treatment
 #==============================================================================
 # Title          : Missing Value Treatment.r
 # Description    : Code to perform missing data analysis and imputation using
