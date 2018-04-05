@@ -22,6 +22,7 @@
 #==============================================================================
 # PACKAGE INSTALATION
 #==============================================================================
+# install.packages("VIM")
 # install.packages("ggplot2")
 # install.packages('mice')
 # install.packages("DMwR")
@@ -30,6 +31,7 @@
 # install.packages('reshape2')
 # install.packages('dplyr')
 # install.packages('wakefield')
+# install.packages('rpart')
 
 #==============================================================================
 # LIBRARY DEPENDENCE
@@ -44,6 +46,7 @@ library(Zelig) # Amelia's LM
 library(reshape2)
 library(dplyr)
 library(wakefield)
+library(rpart)
 
 #------------------------------------------------------------------------------
 # Data generation/preparation and pattern
@@ -51,15 +54,16 @@ library(wakefield)
 n <- 254
 mydata <- r_data_frame( 
     n = n, id, race, age, sex, hour, iq, height, died, 
-	Scoring = rpois(50), Smoker = valid) %>% r_na(prob=0.10)
+	Scoring = rpois(50), Smoker = valid) %>% r_na(prob=0.0)
 mydata <- data.frame(mydata)
 
 # backup original data
 original <- mydata  
 # Introduce missing values - test purposes.
-# set.seed(666)
-# mydata[sample(1:nrow(mydata), 40), "Age"] <- NA
-# mydata[sample(1:nrow(mydata), 40), "Height"] <- NA
+set.seed(666)
+mydata[sample(1:nrow(mydata), 40), "Age"] <- NA
+mydata[sample(1:nrow(mydata), 40), "Height"] <- NA
+mydata[sample(1:nrow(mydata), 40), "Race"] <- NA
 
 head(mydata)
 
@@ -79,7 +83,8 @@ y <- x[,sapply(x, sd) > 0]
 # Create a correlation matrix: Variables missing together have high correlation
 cor(y)
 # Rows are observed variables, columns are indicator variables for missingness
-# high correlation means the row variables is strongly correlated with missingness of the column variable
+# high correlation means the row variables is strongly correlated with 
+# missingness of the column variable
 cor(mydata[,c(3,6,7,9)], y, use = "pairwise.complete.obs")
   
 #------------------------------------------------------------------------------
@@ -136,10 +141,44 @@ impute(mydata$Age, median)  # median
 
 # DMwR ------------------------------------------------------------------------
 library(DMwR)
-actuals <- original$ptratio[is.na(mydata$ptratio)]
-predicteds <- rep(mean(mydata$ptratio, na.rm=T), length(actuals))
+actuals <- original$Age[is.na(mydata$Age)]
+predicteds <- rep(mean(mydata$Age, na.rm=T), length(actuals))
 regr.eval(actuals, predicteds)
 
+#------------------------------------------------------------------------------
+# k-Nearest Neighbours (kNN) Imputation
+#------------------------------------------------------------------------------
+
+# DMwR ------------------------------------------------------------------------
+knnOutput <- knnImputation(mydata[, c("Age","IQ","Height","Scoring")])  
+anyNA(knnOutput)
+
+# compute accuracy
+actuals <- original$Age[is.na(mydata$Age)]
+predicteds <- knnOutput[is.na(mydata$Age), "Age"]
+regr.eval(actuals, predicteds)
+
+# rpart -----------------------------------------------------------------------
+
+# categorical
+class_mod <- rpart(Race ~ . - IQ, 
+	data=mydata[!is.na(mydata$Race), ], method="class", 
+	na.action=na.omit)
+
+# numeric
+anova_mod <- rpart(Age ~ . - IQ, data=mydata[!is.na(mydata$Age), ], 
+	method="anova", na.action=na.omit)
+Race_pred <- predict(class_mod, mydata[is.na(mydata$Age), ])
+Age_pred <- predict(anova_mod, mydata[is.na(mydata$Age), ])
+
+# compute accuracy
+actuals <- original$Age[is.na(mydata$Age)]
+predicteds <- Age_pred
+regr.eval(actuals, predicteds)
+
+actuals <- original$Race[is.na(BostonHousing$Race)]
+predicteds <- as.numeric(colnames(Race_pred)[apply(Race_pred, 1, which.max)])
+mean(actuals != predicteds)  # compute misclass error.
 
 #------------------------------------------------------------------------------
 # Multiple imputation
@@ -170,7 +209,8 @@ summary(cc.res)
 # Amelia ----------------------------------------------------------------------
 mydatasub <- mydata[,c(3,6,7,9)]
 ## Perform imputation
-system.time(am.mydata <- amelia(x = mydatasub, parallel = "multicore", p2s = 0))
+system.time(am.mydata <- amelia(x = mydatasub, 
+			parallel = "multicore", p2s = 0))
 ## Summary of imputed dataset 
 summary(am.mydata)
 ## Plot for imformation
