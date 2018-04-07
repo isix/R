@@ -51,6 +51,7 @@ distro <- list(runif = runif(n, min = -3, max = 3),
                rnorm = rnorm(n))
 			   
 for (m in c("swarm", "center", "hex", "square")) {
+  windows()
   beeswarm(distro, 
     col = 2:3, pch = 16,
     method = m, 
@@ -59,6 +60,7 @@ for (m in c("swarm", "center", "hex", "square")) {
 
 # methods for arranging points (horizontal axis), "corral" methods
 for (ii in c("none", "gutter", "wrap", "random", "omit")) {
+  windows()
   beeswarm(distributions, 
     pch = 21, col = 2:4, bg = "#00000050",
     corral = ii, 
